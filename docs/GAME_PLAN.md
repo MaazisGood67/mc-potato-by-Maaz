@@ -21,10 +21,11 @@ Build an original Rust game with the broad single-player survival and building f
 - Windows executable launches on the target laptop through a profile-free OpenGL 2.1 context
 - Miniquad fallback handles drivers without `WGL_ARB_create_context_profile`
 - Desktop GL 2.1 shader conversion, optional-VAO handling, and depth-clear fallback are in place
-- A seeded four-by-four chunk region now uses compact 16x256x16 block storage with grass, dirt, and stone layers
+- A seeded four-by-four chunk region uses compact 16x256x16 block storage, hills, cave openings, lowland water, dry sand, and sparse trees
 - The current performance test renders a one-chunk radius and shows visible/loaded chunk counts; this is a tuning setting, not the final world limit
 - First-person WASD movement, click-to-capture mouse look, block targeting, and basic block placement/breaking are implemented
 - Gravity, jumping, ground detection, player-vs-block collision, and fall recovery are implemented and covered by tests
+- Main menu, pause/settings screens, persistent render-distance/mouse/fullscreen settings, generated 16x16 pixel atlas, nine-slot hotbar, basic health/hunger/starvation, day/night sky, and versioned world/player/inventory save-load are implemented
 - This is an early foundation, not a feature-complete game or a Minecraft 1.20.1 replacement yet
 - The Windows runtime must still be verified after every new release; CI compilation is not a substitute for testing on the Intel GPU
 
@@ -32,21 +33,20 @@ Build an original Rust game with the broad single-player survival and building f
 
 ### 1. World and Player Foundation
 
-- Verify mouse capture/look, movement, jumping, block selection, break, and place on target hardware
+- Verify menu, settings persistence, textures, save/load, mouse capture/look, movement, jumping, block selection, break, and place on target hardware
 - Measure FPS and frame time at 1-, 2-, and 4-chunk radii before raising the default
-- Add chunk-local dirty mesh rebuilding and incremental edits
+- Add chunk-local dirty mesh rebuilding and incremental edits; current edits rebuild all loaded chunk meshes
 - Acceptance: no GL startup panic, no mesh-clamping spam, and a complete movement/building loop on the Intel GPU
 
 ### 2. Main Menu, HUD, and Settings
 
-- Add a lightweight original title/menu screen with New World, Continue, Settings, and Quit
-- Add a readable hotbar/HUD and configurable render distance, mouse sensitivity, and window mode
-- Acceptance: settings persist locally and remain usable at 1366x768 on the target hardware
+- Improve menu flow and report save/load failures; verify settings persist on Windows
+- Refine hotbar selection and health/hunger feedback
+- Acceptance: settings and saved games survive restart on the target hardware
 
 ### 3. Textures and Core Sandbox Systems
 
-- Add original 16x16 pixel textures using a small atlas and nearest-neighbor filtering
-- Expand seeded terrain with caves, water, trees, and multiple original biomes
+- Expand the generated block palette and add more original biome variation
 - Add chunk streaming, lighting, and save/load while preserving the four-chunk render-radius cap
 - Acceptance: textures remain crisp, worlds reproduce from a seed, and chunk edits update only affected meshes
 
@@ -72,4 +72,4 @@ Build an original Rust game with the broad single-player survival and building f
 
 ## Immediate Next Task
 
-Run the next Windows build on the Intel laptop to verify seeded terrain, mouse input, collision, jump, and block edits together. Then implement dirty-chunk mesh rebuilding, followed by save/load and the inventory/crafting loop. The complete 1.20.1-scale feature benchmark is a long-term roadmap, not a claim that the current build has parity.
+Run the next bundled Windows build on the Intel laptop to verify the menu, texture atlas, settings, save/load, and survival HUD together. Then implement dirty-chunk mesh rebuilding and a real inventory/crafting loop. The 1.20.1-scale feature benchmark is a long-term roadmap, not a claim that the current build has parity.

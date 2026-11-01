@@ -1,32 +1,38 @@
 use std::collections::HashMap;
 
 use noise::{NoiseFn, Perlin};
+use serde::{Deserialize, Serialize};
 
 pub const CHUNK_WIDTH: usize = 16;
 pub const CHUNK_HEIGHT: usize = 256;
 pub const CHUNK_VOLUME: usize = CHUNK_WIDTH * CHUNK_WIDTH * CHUNK_HEIGHT;
 pub const START_CHUNK_RADIUS: i32 = 2;
+const SEA_LEVEL: i32 = 30;
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct ChunkPos {
     pub x: i32,
     pub z: i32,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct BlockPos {
     pub x: i32,
     pub y: i32,
     pub z: i32,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[repr(u8)]
 pub enum BlockId {
     Air = 0,
     Grass = 1,
     Dirt = 2,
     Stone = 3,
+    Water = 4,
+    Sand = 5,
+    Wood = 6,
+    Leaves = 7,
 }
 
 impl BlockId {
@@ -35,11 +41,16 @@ impl BlockId {
             1 => Self::Grass,
             2 => Self::Dirt,
             3 => Self::Stone,
+            4 => Self::Water,
+            5 => Self::Sand,
+            6 => Self::Wood,
+            7 => Self::Leaves,
             _ => Self::Air,
         }
     }
 }
 
+#[derive(Clone, Deserialize, Serialize)]
 pub struct Chunk {
     blocks: Vec<u8>,
 }
@@ -69,6 +80,7 @@ impl Chunk {
     }
 }
 
+#[derive(Clone, Deserialize, Serialize)]
 pub struct World {
     seed: u32,
     chunks: HashMap<ChunkPos, Chunk>,
@@ -83,7 +95,9 @@ impl World {
     }
 
     pub fn generate(seed: u32) -> Self {
-        let perlin = Perlin::new(seed);
+        let height_noise = Perlin::new(seed);
+        let biome_noise = Perlin::new(seed.wrapping_add(0x4D595DF4));
+        let cave_noise = Perlin::new(seed.wrapping_add(0x1B873593));
         let mut world = Self::empty(seed);
 
         for chunk_x in -START_CHUNK_RADIUS..START_CHUNK_RADIUS {
@@ -98,23 +112,94 @@ impl World {
                     for local_z in 0..CHUNK_WIDTH {
                         let world_x = chunk_x * CHUNK_WIDTH as i32 + local_x as i32;
                         let world_z = chunk_z * CHUNK_WIDTH as i32 + local_z as i32;
-                        let noise = perlin.get([world_x as f64 / 40.0, world_z as f64 / 40.0]);
-                        let surface = (36.0 + noise * 12.0).round().clamp(12.0, 60.0) as usize;
+                        let noise =
+                            height_noise.get([world_x as f64 / 40.0, world_z as f64 / 40.0]);
+                        let surface = (36.0 + noise * 12.0).round().clamp(12.0, 60.0) as i32;
+                        let moisture =
+                            biome_noise.get([world_x as f64 / 72.0, world_z as f64 / 72.0]);
+                        let desert = moisture < -0.28;
 
                         for y in 0..=surface {
+                            if y > 5
+                                && y + 4 < surface
+                                && cave_noise.get([
+                                    world_x as f64 / 13.0,
+                                    y as f64 / 9.0,
+                                    world_z as f64 / 13.0,
+                                ]) > 0.58
+                            {
+                                continue;
+                            }
+
                             let block = if y == surface {
-                                BlockId::Grass
+                                if desert {
+                                    BlockId::Sand
+                                } else {
+                                    BlockId::Grass
+                                }
+                            } else if desert && y + 4 >= surface {
+                                BlockId::Sand
                             } else if y + 3 >= surface {
                                 BlockId::Dirt
                             } else {
                                 BlockId::Stone
                             };
-                            chunk.set(local_x, y, local_z, block);
+                            chunk.set(local_x, y as usize, local_z, block);
+                        }
+
+                        if surface < SEA_LEVEL {
+                            for y in surface + 1..=SEA_LEVEL {
+                                chunk.set(local_x, y as usize, local_z, BlockId::Water);
+                            }
                         }
                     }
                 }
 
                 world.chunks.insert(position, chunk);
+            }
+        }
+
+        for world_x in
+            (-START_CHUNK_RADIUS * CHUNK_WIDTH as i32)..(START_CHUNK_RADIUS * CHUNK_WIDTH as i32)
+        {
+            for world_z in (-START_CHUNK_RADIUS * CHUNK_WIDTH as i32)
+                ..(START_CHUNK_RADIUS * CHUNK_WIDTH as i32)
+            {
+                let moisture = biome_noise.get([world_x as f64 / 72.0, world_z as f64 / 72.0]);
+                let tree_hash = tree_hash(seed, world_x, world_z);
+                if moisture < -0.05 || !tree_hash.is_multiple_of(97) {
+                    continue;
+                }
+
+                let Some(surface) = world.surface_height(world_x, world_z) else {
+                    continue;
+                };
+                if world.get_block(world_x, surface - 1, world_z) != BlockId::Grass {
+                    continue;
+                }
+
+                let trunk_height = 3 + (tree_hash % 3) as i32;
+                for y in surface..surface + trunk_height {
+                    world.set_block(world_x, y, world_z, BlockId::Wood);
+                }
+
+                let crown = surface + trunk_height - 1;
+                for offset_y in -2..=2 {
+                    let radius: i32 = if offset_y == 2 { 1 } else { 2 };
+                    for offset_x in -radius..=radius {
+                        for offset_z in -radius..=radius {
+                            if offset_x.abs() + offset_z.abs() > radius + 1 {
+                                continue;
+                            }
+                            let leaf_x = world_x + offset_x;
+                            let leaf_y = crown + offset_y;
+                            let leaf_z = world_z + offset_z;
+                            if world.get_block(leaf_x, leaf_y, leaf_z) == BlockId::Air {
+                                world.set_block(leaf_x, leaf_y, leaf_z, BlockId::Leaves);
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -128,7 +213,7 @@ impl World {
     pub fn surface_height(&self, x: i32, z: i32) -> Option<i32> {
         (0..CHUNK_HEIGHT as i32)
             .rev()
-            .find(|&y| self.get_block(x, y, z) != BlockId::Air)
+            .find(|&y| matches!(self.get_block(x, y, z), BlockId::Grass | BlockId::Sand))
             .map(|y| y + 1)
     }
 
@@ -192,6 +277,16 @@ impl World {
     }
 }
 
+fn tree_hash(seed: u32, x: i32, z: i32) -> u32 {
+    let mut value =
+        seed ^ (x as u32).wrapping_mul(0x9E3779B9) ^ (z as u32).wrapping_mul(0x85EBCA6B);
+    value ^= value >> 16;
+    value = value.wrapping_mul(0x7FEB352D);
+    value ^= value >> 15;
+    value = value.wrapping_mul(0x846CA68B);
+    value ^ (value >> 16)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{BlockId, Chunk, ChunkPos, World, CHUNK_HEIGHT, CHUNK_VOLUME, CHUNK_WIDTH};
@@ -230,13 +325,22 @@ mod tests {
         let mut saw_grass = false;
         let mut saw_dirt = false;
         let mut saw_stone = false;
+        let mut saw_water = false;
+        let mut saw_sand = false;
+        let mut saw_wood = false;
+        let mut saw_leaves = false;
         first.for_each_non_air(|x, y, z, block| {
             assert_eq!(first.get_block(x, y, z), block);
             saw_grass |= block == BlockId::Grass;
             saw_dirt |= block == BlockId::Dirt;
             saw_stone |= block == BlockId::Stone;
+            saw_water |= block == BlockId::Water;
+            saw_sand |= block == BlockId::Sand;
+            saw_wood |= block == BlockId::Wood;
+            saw_leaves |= block == BlockId::Leaves;
         });
         assert!(saw_grass && saw_dirt && saw_stone);
+        assert!(saw_water && saw_sand && saw_wood && saw_leaves);
     }
 
     #[test]
@@ -246,6 +350,9 @@ mod tests {
 
         assert!(surface > 0);
         assert!(surface < CHUNK_HEIGHT as i32);
-        assert_eq!(world.get_block(0, surface - 1, 0), BlockId::Grass);
+        assert!(matches!(
+            world.get_block(0, surface - 1, 0),
+            BlockId::Grass | BlockId::Sand
+        ));
     }
 }

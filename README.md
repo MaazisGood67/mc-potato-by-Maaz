@@ -1,15 +1,14 @@
-# 🥔 MaazX — Minecraft Potato Edition
+# MaazX Potato Edition
 
-> A Rust voxel game that actually runs on your grandma's laptop.
+An original offline Rust voxel-survival game targeting older Windows PCs with Intel integrated graphics and a desktop OpenGL 2.1 baseline.
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/YOUR_USERNAME/maazx)
 
 ---
 
-## What is this?
+## Project Goal
 
-MaazX is a fork and heavy modification of open-source Rust Minecraft clones,
-**specifically optimized for low-end hardware** that every other project ignores.
+The long-term benchmark is the broad single-player feature scope of Minecraft Java 1.20.1. MaazX is a clean-room game, not a Minecraft client; it uses original code and assets and does not promise Java multiplayer or world-file compatibility.
 
 ### Target Machine
 | Spec | Value |
@@ -20,45 +19,56 @@ MaazX is a fork and heavy modification of open-source Rust Minecraft clones,
 | VRAM | 64 MB |
 | API | OpenGL 2.1 / DirectX 10 |
 
-## Why this is unique
+## Current Build
 
-Every Rust Minecraft clone requires Vulkan, DX12, or wgpu — none of which
-work on 2010-era integrated GPUs. MaazX uses **macroquad** with an OpenGL 2.1
-backend, meaning it runs on hardware that's over 15 years old.
+- Seeded 16x256x16 chunk storage in a small four-by-four loaded region
+- Hills, caves, lowland water, sandy areas, and sparse trees
+- First-person mouse look, WASD movement, sprint, jump, gravity, and block collision
+- Block targeting, breaking, and placement
+- Nine-slot hotbar, basic health/hunger, and a day/night sky cycle
+- Main/pause/settings screens, configurable render distance/mouse sensitivity/window mode, and local saves
+- Generated 16x16 pixel-art-style texture atlas
 
-## Features
-- 🥔 **Potato Mode** — auto-detects weak GPU and adjusts settings
-- 🔌 **100% Offline** — no Microsoft account, no login server
-- ⚡ **Optimized** — 4-chunk render distance, aggressive culling
-- 🚀 **Targets 30–60 FPS** on Intel HD Graphics
-- 🦀 **Written in Rust** — fast, safe, no JVM overhead
+This is an early game build. Crafting, full survival systems, broad biome variety, and a connected launcher are not complete. Performance must be measured on the actual laptop; no 30 or 100 FPS result is guaranteed.
 
-## Getting Started (GitHub Codespaces)
+## Run From Source
 
-1. Click **"Open in GitHub Codespaces"** above
-2. Wait ~2 minutes for setup
-3. Open Copilot Chat (sidebar) — select **GPT-6 Sol** model
-4. Read `docs/CLAUDE_DIRECTOR.md` to see the full plan
-5. Paste the first task prompt from the bottom of that file
+Install Rust with [rustup](https://rustup.rs), then from PowerShell in a clone of this repository:
+
+```powershell
+cd .\engine
+cargo run --release
+```
+
+Prebuilt Windows test builds are published in GitHub Releases when a bundled test build is ready. A prebuilt executable does not require Rust to run.
+
+## Controls
+
+- Click in the game window to capture the mouse; Escape opens the pause menu or releases the mouse
+- WASD to move, Shift to sprint, Space to jump
+- Mouse to look; left-click to break and right-click to place
+- Number keys 1-9 or the mouse wheel to select a hotbar slot
 
 ## Project Structure
 ```
-engine/      ← Rust game engine (OpenGL 2.1)
-launcher/    ← HTML offline launcher  
-docs/        ← Architecture decisions by Claude
+engine/      Rust game and OpenGL-compatible renderer
+engine/src/world.rs  Chunk storage, block IDs, and seeded terrain
+engine/vendor/miniquad/  Legacy Windows OpenGL 2.1 compatibility patch
+rustcraft-src/  Reference source only; not the current game engine
+docs/GAME_PLAN.md  Product scope, hardware limits, and milestones
 ```
 
-## Architecture
+## Development Checks
 
-- **Rendering:** macroquad (OpenGL 2.1 — no Vulkan, no wgpu)
-- **World:** 16×256×16 chunks, 4-chunk radius max
-- **Threads:** rayon for chunk gen (max 2 threads)
-- **Auth:** none — fully offline
-- **Director:** Claude (Anthropic)
-- **Coding Agent:** GPT-6 Sol (GitHub Copilot)
+From `engine/`:
 
-## Credits
+```sh
+cargo test --release
+cargo check --target x86_64-pc-windows-gnu
+cargo clippy --release
+cargo build --release
+```
 
-- Base engine forked from [EduRenesto/rustcraft](https://github.com/EduRenesto/rustcraft)
-- Architecture & direction: Claude (Anthropic)  
-- Built by: Maaz (monuson)
+## Reference
+
+The `rustcraft-src/` directory contains the inspected EduRenesto/rustcraft reference. The current MaazX engine is separate and does not use its renderer.
