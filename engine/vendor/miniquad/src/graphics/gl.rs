@@ -579,6 +579,25 @@ impl GlContext {
     }
 }
 
+fn desktop_glsl_120(source: &str) -> String {
+    source
+        .replace("#version 100", "#version 120")
+        .replace("lowp ", "")
+        .replace("mediump ", "")
+        .replace("highp ", "")
+}
+
+#[cfg(test)]
+mod desktop_glsl_tests {
+    use super::desktop_glsl_120;
+
+    #[test]
+    fn converts_es_100_precision_syntax_to_glsl_120() {
+        let source = "#version 100\nvarying lowp vec2 uv;\n";
+        assert_eq!(desktop_glsl_120(source), "#version 120\nvarying vec2 uv;\n");
+    }
+}
+
 fn load_shader_internal(
     vertex_shader: &str,
     fragment_shader: &str,
@@ -895,7 +914,13 @@ impl RenderingBackend for GlContext {
             ShaderSource::Glsl { fragment, vertex } => (fragment, vertex),
             _ => panic!("Metal source on OpenGl context"),
         };
-        let shader = load_shader_internal(vertex, fragment, meta)?;
+        let shader = if self.info.gl_version_string.starts_with("2.") {
+            let vertex = desktop_glsl_120(vertex);
+            let fragment = desktop_glsl_120(fragment);
+            load_shader_internal(&vertex, &fragment, meta)?
+        } else {
+            load_shader_internal(vertex, fragment, meta)?
+        };
         Ok(ShaderId(self.shaders.add(shader)))
     }
 
