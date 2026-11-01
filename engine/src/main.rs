@@ -8,8 +8,12 @@ const WORLD_BATCH_SIZE: usize = 16;
 const DRAW_CALL_MAX_VERTICES: usize = 10_000;
 const DRAW_CALL_MAX_INDICES: usize = 5_000;
 const MAX_BLOCK_HEIGHT: i32 = 16;
-const PLAYER_EYE_HEIGHT: f32 = 2.1;
+const PLAYER_EYE_HEIGHT: f32 = 1.62;
+const PLAYER_HEIGHT: f32 = 1.8;
+const PLAYER_RADIUS: f32 = 0.3;
 const MOVE_SPEED: f32 = 5.0;
+const GRAVITY: f32 = 22.0;
+const JUMP_SPEED: f32 = 8.0;
 const LOOK_SPEED: f32 = 0.0025;
 const REACH: f32 = 6.0;
 
@@ -24,14 +28,18 @@ struct Player {
     position: Vec3,
     yaw: f32,
     pitch: f32,
+    vertical_speed: f32,
+    on_ground: bool,
 }
 
 impl Player {
     fn new() -> Self {
         Self {
-            position: vec3(WORLD_EDGE / 2.0, PLAYER_EYE_HEIGHT, WORLD_EDGE / 2.0),
+            position: vec3(WORLD_EDGE / 2.0, PLAYER_EYE_HEIGHT + 1.0, WORLD_EDGE / 2.0),
             yaw: 0.0,
             pitch: -0.35,
+            vertical_speed: 0.0,
+            on_ground: true,
         }
     }
 
@@ -251,14 +259,134 @@ fn raycast_blocks(
 }
 
 fn block_overlaps_player(block: BlockPos, player: Vec3) -> bool {
-    let horizontal_radius = 0.3;
     let player_feet = player.y - PLAYER_EYE_HEIGHT;
-    (block.x as f32) < player.x + horizontal_radius
-        && (block.x as f32) + 1.0 > player.x - horizontal_radius
-        && (block.z as f32) < player.z + horizontal_radius
-        && (block.z as f32) + 1.0 > player.z - horizontal_radius
-        && (block.y as f32) < player.y
+    (block.x as f32) < player.x + PLAYER_RADIUS
+        && (block.x as f32) + 1.0 > player.x - PLAYER_RADIUS
+        && (block.z as f32) < player.z + PLAYER_RADIUS
+        && (block.z as f32) + 1.0 > player.z - PLAYER_RADIUS
+        && (block.y as f32) < player_feet + PLAYER_HEIGHT
         && (block.y as f32) + 1.0 > player_feet
+}
+
+fn collides_at(blocks: &HashSet<BlockPos>, position: Vec3) -> bool {
+    let feet = position.y - PLAYER_EYE_HEIGHT;
+    let head = feet + PLAYER_HEIGHT;
+    let min_x = (position.x - PLAYER_RADIUS).floor() as i32;
+    let max_x = (position.x + PLAYER_RADIUS - 0.001).floor() as i32;
+    let min_y = (feet + 0.001).floor() as i32;
+    let max_y = (head - 0.001).floor() as i32;
+    let min_z = (position.z - PLAYER_RADIUS).floor() as i32;
+    let max_z = (position.z + PLAYER_RADIUS - 0.001).floor() as i32;
+
+    for x in min_x..=max_x {
+        for y in min_y..=max_y {
+            for z in min_z..=max_z {
+                if blocks.contains(&BlockPos { x, y, z }) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+fn find_landing_height(
+    blocks: &HashSet<BlockPos>,
+    player: Vec3,
+    previous_feet: f32,
+    next_feet: f32,
+) -> Option<f32> {
+    let min_x = (player.x - PLAYER_RADIUS).floor() as i32;
+    let max_x = (player.x + PLAYER_RADIUS - 0.001).floor() as i32;
+    let min_z = (player.z - PLAYER_RADIUS).floor() as i32;
+    let max_z = (player.z + PLAYER_RADIUS - 0.001).floor() as i32;
+    let min_y = (next_feet - 1.0).floor() as i32;
+    let max_y = previous_feet.floor() as i32;
+    let mut landing_height = None;
+
+    for x in min_x..=max_x {
+        for z in min_z..=max_z {
+            for y in min_y..=max_y {
+                if blocks.contains(&BlockPos { x, y, z }) {
+                    let top = y as f32 + 1.0;
+                    if top <= previous_feet + 0.001
+                        && top >= next_feet - 0.001
+                        && landing_height.is_none_or(|current| top > current)
+                    {
+                        landing_height = Some(top);
+                    }
+                }
+            }
+        }
+    }
+
+    landing_height
+}
+
+fn update_player_motion(
+    player: &mut Player,
+    blocks: &HashSet<BlockPos>,
+    movement: Vec3,
+    jump_pressed: bool,
+    frame_time: f32,
+) {
+    if jump_pressed && player.on_ground {
+        player.vertical_speed = JUMP_SPEED;
+        player.on_ground = false;
+    }
+
+    if movement.length_squared() > 0.0 {
+        let delta = movement.normalize() * MOVE_SPEED * frame_time;
+        let next_x = vec3(
+            player.position.x + delta.x,
+            player.position.y,
+            player.position.z,
+        );
+        if !collides_at(blocks, next_x) {
+            player.position.x = next_x.x;
+        }
+        let next_z = vec3(
+            player.position.x,
+            player.position.y,
+            player.position.z + delta.z,
+        );
+        if !collides_at(blocks, next_z) {
+            player.position.z = next_z.z;
+        }
+    }
+
+    player.vertical_speed -= GRAVITY * frame_time;
+    let previous_feet = player.position.y - PLAYER_EYE_HEIGHT;
+    let next_y = player.position.y + player.vertical_speed * frame_time;
+    let next_feet = next_y - PLAYER_EYE_HEIGHT;
+
+    if player.vertical_speed <= 0.0 {
+        if let Some(landing_height) =
+            find_landing_height(blocks, player.position, previous_feet, next_feet)
+        {
+            player.position.y = landing_height + PLAYER_EYE_HEIGHT;
+            player.vertical_speed = 0.0;
+            player.on_ground = true;
+        } else {
+            player.position.y = next_y;
+            player.on_ground = false;
+        }
+    } else {
+        let next_position = vec3(player.position.x, next_y, player.position.z);
+        if collides_at(blocks, next_position) {
+            player.vertical_speed = 0.0;
+        } else {
+            player.position.y = next_y;
+            player.on_ground = false;
+        }
+    }
+
+    if player.position.y < -32.0 {
+        player.position = vec3(WORLD_EDGE / 2.0, PLAYER_EYE_HEIGHT + 1.0, WORLD_EDGE / 2.0);
+        player.vertical_speed = 0.0;
+        player.on_ground = true;
+    }
 }
 
 #[macroquad::main(window_conf)]
@@ -303,9 +431,13 @@ async fn main() {
         if is_key_down(KeyCode::A) {
             movement -= right;
         }
-        if movement.length_squared() > 0.0 {
-            player.position += movement.normalize() * MOVE_SPEED * frame_time;
-        }
+        update_player_motion(
+            &mut player,
+            &blocks,
+            movement,
+            is_key_pressed(KeyCode::Space),
+            frame_time,
+        );
 
         player.position.x = player.position.x.clamp(0.2, WORLD_EDGE - 0.2);
         player.position.z = player.position.z.clamp(0.2, WORLD_EDGE - 0.2);
@@ -384,7 +516,7 @@ async fn main() {
         draw_text(&hud_text, 10.0, 50.0, 18.0, WHITE);
         draw_text(
             if mouse_captured {
-                "WASD move | Mouse look | Left break | Right place | ESC release"
+                "WASD move | SPACE jump | Mouse look | Left break | Right place | ESC release"
             } else {
                 "Click to capture mouse | WASD move | ESC quit"
             },
@@ -401,10 +533,10 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        make_flat_world, make_world_meshes, raycast_blocks, BlockPos, DRAW_CALL_MAX_INDICES,
-        DRAW_CALL_MAX_VERTICES, WORLD_SIZE,
+        collides_at, make_flat_world, make_world_meshes, raycast_blocks, BlockPos, Player,
+        DRAW_CALL_MAX_INDICES, DRAW_CALL_MAX_VERTICES, PLAYER_EYE_HEIGHT, WORLD_SIZE,
     };
-    use macroquad::prelude::vec3;
+    use macroquad::prelude::{vec3, Vec3};
 
     #[test]
     fn block_world_batches_fit_macroquad_drawcall_limits() {
@@ -428,5 +560,60 @@ mod tests {
             hit,
             Some((BlockPos { x: 2, y: 1, z: 2 }, BlockPos { x: 1, y: 1, z: 2 }))
         );
+    }
+
+    #[test]
+    fn player_stands_on_top_of_floor_without_overlap() {
+        let blocks = make_flat_world();
+        let player = vec3(4.5, PLAYER_EYE_HEIGHT + 1.0, 4.5);
+
+        assert!(!collides_at(&blocks, player));
+    }
+
+    #[test]
+    fn player_cannot_overlap_a_block_wall() {
+        let blocks = [BlockPos { x: 1, y: 1, z: 1 }].into_iter().collect();
+        let player = vec3(0.8, PLAYER_EYE_HEIGHT + 1.0, 1.5);
+
+        assert!(collides_at(&blocks, player));
+        assert!(super::block_overlaps_player(
+            BlockPos { x: 1, y: 1, z: 1 },
+            player
+        ));
+    }
+
+    #[test]
+    fn new_player_spawns_grounded_above_floor() {
+        let player = Player::new();
+
+        assert!(player.on_ground);
+        assert!((player.position.y - PLAYER_EYE_HEIGHT - 1.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn gravity_lands_player_on_floor() {
+        let blocks = make_flat_world();
+        let mut player = Player::new();
+        player.position.y += 1.0;
+        player.on_ground = false;
+
+        for _ in 0..120 {
+            super::update_player_motion(&mut player, &blocks, Vec3::ZERO, false, 1.0 / 60.0);
+        }
+
+        assert!(player.on_ground);
+        assert!((player.position.y - PLAYER_EYE_HEIGHT - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn jump_moves_grounded_player_upward() {
+        let blocks = make_flat_world();
+        let mut player = Player::new();
+        let starting_height = player.position.y;
+
+        super::update_player_motion(&mut player, &blocks, Vec3::ZERO, true, 1.0 / 60.0);
+
+        assert!(player.position.y > starting_height);
+        assert!(!player.on_ground);
     }
 }
