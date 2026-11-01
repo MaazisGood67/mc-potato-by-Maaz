@@ -651,6 +651,21 @@ gl_loader!(
     fn glPolygonMode(face: GLenum, mode: GLenum) -> ()
 );
 
+pub fn supports_vertex_arrays() -> bool {
+    unsafe {
+        matches!(__pfns::glGenVertexArrays, Some(_))
+            && matches!(__pfns::glBindVertexArray, Some(_))
+    }
+}
+
+pub unsafe fn clear_depth_compat(depth: f32) {
+    if matches!(__pfns::glClearDepthf, Some(_)) {
+        glClearDepthf(depth);
+    } else {
+        glClearDepth(depth as _);
+    }
+}
+
 // note that glGetString only works after first glSwapBuffer,
 // not just after context creation
 pub unsafe fn is_gl2() -> bool {

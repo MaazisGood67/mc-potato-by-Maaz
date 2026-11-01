@@ -537,8 +537,16 @@ impl GlContext {
             );
             let mut vao = 0;
 
-            glGenVertexArrays(1, &mut vao as *mut _);
-            glBindVertexArray(vao);
+            #[cfg(not(target_arch = "wasm32"))]
+            if crate::native::gl::supports_vertex_arrays() {
+                glGenVertexArrays(1, &mut vao as *mut _);
+                glBindVertexArray(vao);
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                glGenVertexArrays(1, &mut vao as *mut _);
+                glBindVertexArray(vao);
+            }
             let info = gl_info();
             GlContext {
                 default_framebuffer,
@@ -1636,6 +1644,9 @@ impl RenderingBackend for GlContext {
         if let Some(v) = depth {
             bits |= GL_DEPTH_BUFFER_BIT;
             unsafe {
+                #[cfg(not(target_arch = "wasm32"))]
+                crate::native::gl::clear_depth_compat(v);
+                #[cfg(target_arch = "wasm32")]
                 glClearDepthf(v);
             }
         }
