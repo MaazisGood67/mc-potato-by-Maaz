@@ -11,6 +11,8 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
+    env:
+      RUSTFLAGS: -C target-feature=+crt-static
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -36,7 +38,7 @@ jobs:
           tag_name: ${{ github.ref_name }}
           prerelease: true
           body: |
-            Windows test build. This is an early prototype, not a final compatibility guarantee.
+            Self-contained Windows x64 test build with the MSVC runtime linked statically. This is an early prototype, not a final compatibility guarantee.
 
             Download `maazx.exe` and double-click it to run. Rust is not needed to run the prebuilt executable.
 
