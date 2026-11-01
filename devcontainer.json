@@ -1,0 +1,67 @@
+{
+  "name": "MaazX Potato Edition — Rust Dev",
+  "image": "mcr.microsoft.com/devcontainers/rust:1-bullseye",
+
+  "features": {
+    "ghcr.io/devcontainers/features/rust:1": {
+      "version": "stable",
+      "profile": "default"
+    },
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "17",
+      "jdk": "ms"
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20"
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "editor.formatOnSave": true,
+        "rust-analyzer.checkOnSave.command": "clippy",
+        "rust-analyzer.cargo.features": "all",
+        "github.copilot.chat.defaultModel": "gpt-6-sol",
+        "github.copilot.editor.enableAutoCompletions": true,
+        "github.copilot.chat.agent.thinkingTool": true,
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "files.autoSave": "afterDelay",
+        "editor.inlineSuggest.enabled": true
+      },
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "GitHub.copilot",
+        "GitHub.copilot-chat",
+        "vadimcn.vscode-lldb",
+        "tamasfe.even-better-toml",
+        "serayuzgur.crates",
+        "usernamehw.errorlens",
+        "eamodio.gitlens",
+        "ms-vscode.hexeditor",
+        "formulahendry.code-runner"
+      ]
+    }
+  },
+
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+
+  "remoteEnv": {
+    "RUST_LOG": "warn,maazx=debug",
+    "CARGO_INCREMENTAL": "1",
+    "RUSTFLAGS": "-C target-cpu=native"
+  },
+
+  "forwardPorts": [25565, 8080],
+  "portsAttributes": {
+    "25565": { "label": "Minecraft Server", "onAutoForward": "silent" },
+    "8080":  { "label": "Launcher Dev Server", "onAutoForward": "notify" }
+  },
+
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "8gb",
+    "storage": "32gb"
+  }
+}
