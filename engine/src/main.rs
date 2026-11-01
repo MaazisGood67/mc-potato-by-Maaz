@@ -1,13 +1,15 @@
-use std::{collections::HashSet, fmt::Write};
+use std::{collections::HashMap, fmt::Write};
 
 use macroquad::prelude::*;
 
-const WORLD_SIZE: usize = 64;
-const WORLD_EDGE: f32 = WORLD_SIZE as f32;
-const WORLD_BATCH_SIZE: usize = 16;
+mod world;
+use world::{BlockId, BlockPos, ChunkPos, World, CHUNK_HEIGHT, CHUNK_WIDTH, START_CHUNK_RADIUS};
+
+const WORLD_HALF_EDGE: f32 = (CHUNK_WIDTH as i32 * START_CHUNK_RADIUS) as f32;
+const WORLD_MIN: f32 = -WORLD_HALF_EDGE;
+const WORLD_MAX: f32 = WORLD_HALF_EDGE;
 const DRAW_CALL_MAX_VERTICES: usize = 10_000;
 const DRAW_CALL_MAX_INDICES: usize = 5_000;
-const MAX_BLOCK_HEIGHT: i32 = 16;
 const PLAYER_EYE_HEIGHT: f32 = 1.62;
 const PLAYER_HEIGHT: f32 = 1.8;
 const PLAYER_RADIUS: f32 = 0.3;
@@ -16,13 +18,6 @@ const GRAVITY: f32 = 22.0;
 const JUMP_SPEED: f32 = 8.0;
 const LOOK_SPEED: f32 = 0.0025;
 const REACH: f32 = 6.0;
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-struct BlockPos {
-    x: i32,
-    y: i32,
-    z: i32,
-}
 
 struct Player {
     position: Vec3,
@@ -33,9 +28,9 @@ struct Player {
 }
 
 impl Player {
-    fn new() -> Self {
+    fn new(x: f32, surface_height: f32, z: f32) -> Self {
         Self {
-            position: vec3(WORLD_EDGE / 2.0, PLAYER_EYE_HEIGHT + 1.0, WORLD_EDGE / 2.0),
+            position: vec3(x, surface_height + PLAYER_EYE_HEIGHT, z),
             yaw: 0.0,
             pitch: -0.35,
             vertical_speed: 0.0,
@@ -62,16 +57,6 @@ fn window_conf() -> Conf {
     }
 }
 
-fn make_flat_world() -> HashSet<BlockPos> {
-    let mut blocks = HashSet::with_capacity(WORLD_SIZE * WORLD_SIZE);
-    for x in 0..WORLD_SIZE as i32 {
-        for z in 0..WORLD_SIZE as i32 {
-            blocks.insert(BlockPos { x, y: 0, z });
-        }
-    }
-    blocks
-}
-
 fn push_quad(vertices: &mut Vec<Vertex>, indices: &mut Vec<u16>, points: [Vec3; 4], color: Color) {
     let first_vertex = vertices.len() as u16;
     vertices.extend([
@@ -90,149 +75,179 @@ fn push_quad(vertices: &mut Vec<Vertex>, indices: &mut Vec<u16>, points: [Vec3; 
     ]);
 }
 
-fn make_world_meshes(blocks: &HashSet<BlockPos>) -> Vec<Mesh> {
-    let mut meshes = Vec::new();
-    let batch_size = WORLD_BATCH_SIZE as i32;
+struct MeshBuilder {
+    meshes: Vec<Mesh>,
+    vertices: Vec<Vertex>,
+    indices: Vec<u16>,
+}
 
-    for batch_x in (0..WORLD_SIZE as i32).step_by(WORLD_BATCH_SIZE) {
-        for batch_z in (0..WORLD_SIZE as i32).step_by(WORLD_BATCH_SIZE) {
-            let mut vertices = Vec::with_capacity(2048);
-            let mut indices = Vec::with_capacity(3072);
-
-            for block in blocks.iter().filter(|block| {
-                block.x >= batch_x
-                    && block.x < batch_x + batch_size
-                    && block.z >= batch_z
-                    && block.z < batch_z + batch_size
-            }) {
-                let x = block.x as f32;
-                let y = block.y as f32;
-                let z = block.z as f32;
-                let grass = if ((block.x + block.z) & 1) == 0 {
-                    Color::from_rgba(78, 154, 52, 255)
-                } else {
-                    Color::from_rgba(70, 145, 46, 255)
-                };
-                let dirt = Color::from_rgba(134, 96, 67, 255);
-                let dark_dirt = Color::from_rgba(105, 75, 53, 255);
-                let faces = [
-                    (
-                        BlockPos {
-                            y: block.y + 1,
-                            ..*block
-                        },
-                        [
-                            vec3(x, y + 1.0, z),
-                            vec3(x + 1.0, y + 1.0, z),
-                            vec3(x + 1.0, y + 1.0, z + 1.0),
-                            vec3(x, y + 1.0, z + 1.0),
-                        ],
-                        grass,
-                    ),
-                    (
-                        BlockPos {
-                            y: block.y - 1,
-                            ..*block
-                        },
-                        [
-                            vec3(x, y, z + 1.0),
-                            vec3(x + 1.0, y, z + 1.0),
-                            vec3(x + 1.0, y, z),
-                            vec3(x, y, z),
-                        ],
-                        dark_dirt,
-                    ),
-                    (
-                        BlockPos {
-                            x: block.x - 1,
-                            ..*block
-                        },
-                        [
-                            vec3(x, y, z),
-                            vec3(x, y + 1.0, z),
-                            vec3(x, y + 1.0, z + 1.0),
-                            vec3(x, y, z + 1.0),
-                        ],
-                        dirt,
-                    ),
-                    (
-                        BlockPos {
-                            x: block.x + 1,
-                            ..*block
-                        },
-                        [
-                            vec3(x + 1.0, y, z + 1.0),
-                            vec3(x + 1.0, y + 1.0, z + 1.0),
-                            vec3(x + 1.0, y + 1.0, z),
-                            vec3(x + 1.0, y, z),
-                        ],
-                        dirt,
-                    ),
-                    (
-                        BlockPos {
-                            z: block.z - 1,
-                            ..*block
-                        },
-                        [
-                            vec3(x + 1.0, y, z),
-                            vec3(x + 1.0, y + 1.0, z),
-                            vec3(x, y + 1.0, z),
-                            vec3(x, y, z),
-                        ],
-                        dirt,
-                    ),
-                    (
-                        BlockPos {
-                            z: block.z + 1,
-                            ..*block
-                        },
-                        [
-                            vec3(x, y, z + 1.0),
-                            vec3(x, y + 1.0, z + 1.0),
-                            vec3(x + 1.0, y + 1.0, z + 1.0),
-                            vec3(x + 1.0, y, z + 1.0),
-                        ],
-                        dirt,
-                    ),
-                ];
-
-                for (neighbor, points, color) in faces {
-                    if blocks.contains(&neighbor) {
-                        continue;
-                    }
-                    if vertices.len() + 4 > DRAW_CALL_MAX_VERTICES
-                        || indices.len() + 6 > DRAW_CALL_MAX_INDICES
-                    {
-                        meshes.push(Mesh {
-                            vertices: std::mem::take(&mut vertices),
-                            indices: std::mem::take(&mut indices),
-                            texture: None,
-                        });
-                        vertices = Vec::with_capacity(2048);
-                        indices = Vec::with_capacity(3072);
-                    }
-                    push_quad(&mut vertices, &mut indices, points, color);
-                }
-            }
-
-            if !vertices.is_empty() {
-                meshes.push(Mesh {
-                    vertices,
-                    indices,
-                    texture: None,
-                });
-            }
+impl MeshBuilder {
+    fn new() -> Self {
+        Self {
+            meshes: Vec::new(),
+            vertices: Vec::with_capacity(4096),
+            indices: Vec::with_capacity(4096),
         }
     }
 
-    meshes
+    fn push_face(&mut self, points: [Vec3; 4], color: Color) {
+        if self.vertices.len() + 4 > DRAW_CALL_MAX_VERTICES
+            || self.indices.len() + 6 > DRAW_CALL_MAX_INDICES
+        {
+            self.flush();
+        }
+        push_quad(&mut self.vertices, &mut self.indices, points, color);
+    }
+
+    fn flush(&mut self) {
+        if self.vertices.is_empty() {
+            return;
+        }
+        self.meshes.push(Mesh {
+            vertices: std::mem::replace(&mut self.vertices, Vec::with_capacity(4096)),
+            indices: std::mem::replace(&mut self.indices, Vec::with_capacity(4096)),
+            texture: None,
+        });
+    }
+
+    fn finish(mut self) -> Vec<Mesh> {
+        self.flush();
+        self.meshes
+    }
 }
 
-fn raycast_blocks(
-    blocks: &HashSet<BlockPos>,
-    origin: Vec3,
-    direction: Vec3,
-) -> Option<(BlockPos, BlockPos)> {
+fn make_world_meshes(world: &World) -> Vec<Mesh> {
+    let mut builders = HashMap::<ChunkPos, MeshBuilder>::new();
+    world.for_each_non_air(|block_x, block_y, block_z, block_id| {
+        let block = BlockPos {
+            x: block_x,
+            y: block_y,
+            z: block_z,
+        };
+        let chunk_position = ChunkPos {
+            x: block_x.div_euclid(CHUNK_WIDTH as i32),
+            z: block_z.div_euclid(CHUNK_WIDTH as i32),
+        };
+        let builder = builders
+            .entry(chunk_position)
+            .or_insert_with(MeshBuilder::new);
+
+        let x = block.x as f32;
+        let y = block.y as f32;
+        let z = block.z as f32;
+        let (top_color, side_color, bottom_color) = match block_id {
+            BlockId::Grass => (
+                Color::from_rgba(78, 154, 52, 255),
+                Color::from_rgba(134, 96, 67, 255),
+                Color::from_rgba(105, 75, 53, 255),
+            ),
+            BlockId::Dirt => (
+                Color::from_rgba(134, 96, 67, 255),
+                Color::from_rgba(120, 84, 58, 255),
+                Color::from_rgba(105, 75, 53, 255),
+            ),
+            BlockId::Stone => {
+                let stone = Color::from_rgba(125, 125, 125, 255);
+                (stone, stone, stone)
+            }
+            BlockId::Air => return,
+        };
+
+        let faces = [
+            (
+                BlockPos {
+                    y: block.y + 1,
+                    ..block
+                },
+                [
+                    vec3(x, y + 1.0, z),
+                    vec3(x + 1.0, y + 1.0, z),
+                    vec3(x + 1.0, y + 1.0, z + 1.0),
+                    vec3(x, y + 1.0, z + 1.0),
+                ],
+                top_color,
+            ),
+            (
+                BlockPos {
+                    y: block.y - 1,
+                    ..block
+                },
+                [
+                    vec3(x, y, z + 1.0),
+                    vec3(x + 1.0, y, z + 1.0),
+                    vec3(x + 1.0, y, z),
+                    vec3(x, y, z),
+                ],
+                bottom_color,
+            ),
+            (
+                BlockPos {
+                    x: block.x - 1,
+                    ..block
+                },
+                [
+                    vec3(x, y, z),
+                    vec3(x, y + 1.0, z),
+                    vec3(x, y + 1.0, z + 1.0),
+                    vec3(x, y, z + 1.0),
+                ],
+                side_color,
+            ),
+            (
+                BlockPos {
+                    x: block.x + 1,
+                    ..block
+                },
+                [
+                    vec3(x + 1.0, y, z + 1.0),
+                    vec3(x + 1.0, y + 1.0, z + 1.0),
+                    vec3(x + 1.0, y + 1.0, z),
+                    vec3(x + 1.0, y, z),
+                ],
+                side_color,
+            ),
+            (
+                BlockPos {
+                    z: block.z - 1,
+                    ..block
+                },
+                [
+                    vec3(x + 1.0, y, z),
+                    vec3(x + 1.0, y + 1.0, z),
+                    vec3(x, y + 1.0, z),
+                    vec3(x, y, z),
+                ],
+                side_color,
+            ),
+            (
+                BlockPos {
+                    z: block.z + 1,
+                    ..block
+                },
+                [
+                    vec3(x, y, z + 1.0),
+                    vec3(x, y + 1.0, z + 1.0),
+                    vec3(x + 1.0, y + 1.0, z + 1.0),
+                    vec3(x + 1.0, y, z + 1.0),
+                ],
+                side_color,
+            ),
+        ];
+
+        for (neighbor, points, color) in faces {
+            if world.get_block(neighbor.x, neighbor.y, neighbor.z) == BlockId::Air {
+                builder.push_face(points, color);
+            }
+        }
+    });
+
+    builders
+        .into_values()
+        .flat_map(MeshBuilder::finish)
+        .collect()
+}
+
+fn raycast_blocks(world: &World, origin: Vec3, direction: Vec3) -> Option<(BlockPos, BlockPos)> {
     let mut previous = BlockPos {
         x: origin.x.floor() as i32,
         y: origin.y.floor() as i32,
@@ -249,7 +264,7 @@ fn raycast_blocks(
         if current == previous {
             continue;
         }
-        if blocks.contains(&current) {
+        if world.get_block(current.x, current.y, current.z) != BlockId::Air {
             return Some((current, previous));
         }
         previous = current;
@@ -268,7 +283,7 @@ fn block_overlaps_player(block: BlockPos, player: Vec3) -> bool {
         && (block.y as f32) + 1.0 > player_feet
 }
 
-fn collides_at(blocks: &HashSet<BlockPos>, position: Vec3) -> bool {
+fn collides_at(world: &World, position: Vec3) -> bool {
     let feet = position.y - PLAYER_EYE_HEIGHT;
     let head = feet + PLAYER_HEIGHT;
     let min_x = (position.x - PLAYER_RADIUS).floor() as i32;
@@ -281,7 +296,7 @@ fn collides_at(blocks: &HashSet<BlockPos>, position: Vec3) -> bool {
     for x in min_x..=max_x {
         for y in min_y..=max_y {
             for z in min_z..=max_z {
-                if blocks.contains(&BlockPos { x, y, z }) {
+                if world.get_block(x, y, z) != BlockId::Air {
                     return true;
                 }
             }
@@ -292,7 +307,7 @@ fn collides_at(blocks: &HashSet<BlockPos>, position: Vec3) -> bool {
 }
 
 fn find_landing_height(
-    blocks: &HashSet<BlockPos>,
+    world: &World,
     player: Vec3,
     previous_feet: f32,
     next_feet: f32,
@@ -308,7 +323,7 @@ fn find_landing_height(
     for x in min_x..=max_x {
         for z in min_z..=max_z {
             for y in min_y..=max_y {
-                if blocks.contains(&BlockPos { x, y, z }) {
+                if world.get_block(x, y, z) != BlockId::Air {
                     let top = y as f32 + 1.0;
                     if top <= previous_feet + 0.001
                         && top >= next_feet - 0.001
@@ -326,7 +341,7 @@ fn find_landing_height(
 
 fn update_player_motion(
     player: &mut Player,
-    blocks: &HashSet<BlockPos>,
+    world: &World,
     movement: Vec3,
     jump_pressed: bool,
     frame_time: f32,
@@ -343,7 +358,7 @@ fn update_player_motion(
             player.position.y,
             player.position.z,
         );
-        if !collides_at(blocks, next_x) {
+        if !collides_at(world, next_x) {
             player.position.x = next_x.x;
         }
         let next_z = vec3(
@@ -351,7 +366,7 @@ fn update_player_motion(
             player.position.y,
             player.position.z + delta.z,
         );
-        if !collides_at(blocks, next_z) {
+        if !collides_at(world, next_z) {
             player.position.z = next_z.z;
         }
     }
@@ -363,7 +378,7 @@ fn update_player_motion(
 
     if player.vertical_speed <= 0.0 {
         if let Some(landing_height) =
-            find_landing_height(blocks, player.position, previous_feet, next_feet)
+            find_landing_height(world, player.position, previous_feet, next_feet)
         {
             player.position.y = landing_height + PLAYER_EYE_HEIGHT;
             player.vertical_speed = 0.0;
@@ -374,7 +389,7 @@ fn update_player_motion(
         }
     } else {
         let next_position = vec3(player.position.x, next_y, player.position.z);
-        if collides_at(blocks, next_position) {
+        if collides_at(world, next_position) {
             player.vertical_speed = 0.0;
         } else {
             player.position.y = next_y;
@@ -383,7 +398,8 @@ fn update_player_motion(
     }
 
     if player.position.y < -32.0 {
-        player.position = vec3(WORLD_EDGE / 2.0, PLAYER_EYE_HEIGHT + 1.0, WORLD_EDGE / 2.0);
+        let spawn_height = world.surface_height(0, 0).unwrap_or(1) as f32;
+        player.position = vec3(0.5, spawn_height + PLAYER_EYE_HEIGHT, 0.5);
         player.vertical_speed = 0.0;
         player.on_ground = true;
     }
@@ -391,9 +407,12 @@ fn update_player_motion(
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    let mut player = Player::new();
-    let mut blocks = make_flat_world();
-    let mut world_meshes = make_world_meshes(&blocks);
+    let mut world = World::generate(1_203_001);
+    let spawn_x = 0.5;
+    let spawn_z = 0.5;
+    let spawn_height = world.surface_height(0, 0).unwrap_or(1) as f32;
+    let mut player = Player::new(spawn_x, spawn_height, spawn_z);
+    let mut world_meshes = make_world_meshes(&world);
     let mut hud_text = String::with_capacity(64);
     let mut mouse_captured = false;
     set_cursor_grab(false);
@@ -433,14 +452,14 @@ async fn main() {
         }
         update_player_motion(
             &mut player,
-            &blocks,
+            &world,
             movement,
             is_key_pressed(KeyCode::Space),
             frame_time,
         );
 
-        player.position.x = player.position.x.clamp(0.2, WORLD_EDGE - 0.2);
-        player.position.z = player.position.z.clamp(0.2, WORLD_EDGE - 0.2);
+        player.position.x = player.position.x.clamp(WORLD_MIN + 0.2, WORLD_MAX - 0.2);
+        player.position.z = player.position.z.clamp(WORLD_MIN + 0.2, WORLD_MAX - 0.2);
 
         if is_key_pressed(KeyCode::Escape) {
             if mouse_captured {
@@ -453,23 +472,22 @@ async fn main() {
         }
 
         if mouse_captured && !capture_click {
-            if let Some((hit, adjacent)) =
-                raycast_blocks(&blocks, player.position, player.forward())
+            if let Some((hit, adjacent)) = raycast_blocks(&world, player.position, player.forward())
             {
                 if is_mouse_button_pressed(MouseButton::Left) {
-                    blocks.remove(&hit);
-                    world_meshes = make_world_meshes(&blocks);
+                    world.set_block(hit.x, hit.y, hit.z, BlockId::Air);
+                    world_meshes = make_world_meshes(&world);
                 } else if is_mouse_button_pressed(MouseButton::Right)
                     && adjacent.y >= 0
-                    && adjacent.y < MAX_BLOCK_HEIGHT
-                    && adjacent.x >= 0
-                    && adjacent.x < WORLD_SIZE as i32
-                    && adjacent.z >= 0
-                    && adjacent.z < WORLD_SIZE as i32
+                    && adjacent.y < CHUNK_HEIGHT as i32
+                    && adjacent.x as f32 >= WORLD_MIN
+                    && (adjacent.x as f32) < WORLD_MAX
+                    && adjacent.z as f32 >= WORLD_MIN
+                    && (adjacent.z as f32) < WORLD_MAX
                     && !block_overlaps_player(adjacent, player.position)
-                    && blocks.insert(adjacent)
                 {
-                    world_meshes = make_world_meshes(&blocks);
+                    world.set_block(adjacent.x, adjacent.y, adjacent.z, BlockId::Grass);
+                    world_meshes = make_world_meshes(&world);
                 }
             }
         }
@@ -487,7 +505,7 @@ async fn main() {
         }
 
         let targeted_block = if mouse_captured {
-            raycast_blocks(&blocks, player.position, player.forward()).map(|hit| hit.0)
+            raycast_blocks(&world, player.position, player.forward()).map(|hit| hit.0)
         } else {
             None
         };
@@ -514,6 +532,9 @@ async fn main() {
             player.position.x, player.position.y, player.position.z
         );
         draw_text(&hud_text, 10.0, 50.0, 18.0, WHITE);
+        hud_text.clear();
+        let _ = write!(hud_text, "World seed: {}", world.seed());
+        draw_text(&hud_text, 10.0, 72.0, 16.0, WHITE);
         draw_text(
             if mouse_captured {
                 "WASD move | SPACE jump | Mouse look | Left break | Right place | ESC release"
@@ -533,18 +554,18 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        collides_at, make_flat_world, make_world_meshes, raycast_blocks, BlockPos, Player,
-        DRAW_CALL_MAX_INDICES, DRAW_CALL_MAX_VERTICES, PLAYER_EYE_HEIGHT, WORLD_SIZE,
+        collides_at, make_world_meshes, raycast_blocks, update_player_motion, BlockId, BlockPos,
+        Player, DRAW_CALL_MAX_INDICES, DRAW_CALL_MAX_VERTICES, PLAYER_EYE_HEIGHT,
     };
+    use crate::world::World;
     use macroquad::prelude::{vec3, Vec3};
 
     #[test]
     fn block_world_batches_fit_macroquad_drawcall_limits() {
-        let blocks = make_flat_world();
-        let meshes = make_world_meshes(&blocks);
+        let world = World::generate(1);
+        let meshes = make_world_meshes(&world);
 
-        assert_eq!(blocks.len(), WORLD_SIZE * WORLD_SIZE);
-        assert_eq!(meshes.len(), 16);
+        assert!(!meshes.is_empty());
         assert!(meshes.iter().all(|mesh| {
             mesh.vertices.len() < DRAW_CALL_MAX_VERTICES
                 && mesh.indices.len() < DRAW_CALL_MAX_INDICES
@@ -553,8 +574,9 @@ mod tests {
 
     #[test]
     fn raycast_returns_hit_and_adjacent_empty_block() {
-        let blocks = [BlockPos { x: 2, y: 1, z: 2 }].into_iter().collect();
-        let hit = raycast_blocks(&blocks, vec3(0.5, 1.5, 2.5), vec3(1.0, 0.0, 0.0));
+        let mut world = World::empty(1);
+        world.set_block(2, 1, 2, BlockId::Stone);
+        let hit = raycast_blocks(&world, vec3(0.5, 1.5, 2.5), vec3(1.0, 0.0, 0.0));
 
         assert_eq!(
             hit,
@@ -564,18 +586,20 @@ mod tests {
 
     #[test]
     fn player_stands_on_top_of_floor_without_overlap() {
-        let blocks = make_flat_world();
+        let mut world = World::empty(1);
+        world.set_block(4, 0, 4, BlockId::Grass);
         let player = vec3(4.5, PLAYER_EYE_HEIGHT + 1.0, 4.5);
 
-        assert!(!collides_at(&blocks, player));
+        assert!(!collides_at(&world, player));
     }
 
     #[test]
     fn player_cannot_overlap_a_block_wall() {
-        let blocks = [BlockPos { x: 1, y: 1, z: 1 }].into_iter().collect();
+        let mut world = World::empty(1);
+        world.set_block(1, 1, 1, BlockId::Stone);
         let player = vec3(0.8, PLAYER_EYE_HEIGHT + 1.0, 1.5);
 
-        assert!(collides_at(&blocks, player));
+        assert!(collides_at(&world, player));
         assert!(super::block_overlaps_player(
             BlockPos { x: 1, y: 1, z: 1 },
             player
@@ -584,21 +608,24 @@ mod tests {
 
     #[test]
     fn new_player_spawns_grounded_above_floor() {
-        let player = Player::new();
+        let world = World::generate(1);
+        let height = world.surface_height(0, 0).unwrap() as f32;
+        let player = Player::new(0.5, height, 0.5);
 
         assert!(player.on_ground);
-        assert!((player.position.y - PLAYER_EYE_HEIGHT - 1.0).abs() < 0.0001);
+        assert!((player.position.y - PLAYER_EYE_HEIGHT - height).abs() < 0.0001);
     }
 
     #[test]
     fn gravity_lands_player_on_floor() {
-        let blocks = make_flat_world();
-        let mut player = Player::new();
+        let mut world = World::empty(1);
+        world.set_block(4, 0, 4, BlockId::Grass);
+        let mut player = Player::new(4.5, 1.0, 4.5);
         player.position.y += 1.0;
         player.on_ground = false;
 
         for _ in 0..120 {
-            super::update_player_motion(&mut player, &blocks, Vec3::ZERO, false, 1.0 / 60.0);
+            update_player_motion(&mut player, &world, Vec3::ZERO, false, 1.0 / 60.0);
         }
 
         assert!(player.on_ground);
@@ -607,11 +634,12 @@ mod tests {
 
     #[test]
     fn jump_moves_grounded_player_upward() {
-        let blocks = make_flat_world();
-        let mut player = Player::new();
+        let mut world = World::empty(1);
+        world.set_block(4, 0, 4, BlockId::Grass);
+        let mut player = Player::new(4.5, 1.0, 4.5);
         let starting_height = player.position.y;
 
-        super::update_player_motion(&mut player, &blocks, Vec3::ZERO, true, 1.0 / 60.0);
+        update_player_motion(&mut player, &world, Vec3::ZERO, true, 1.0 / 60.0);
 
         assert!(player.position.y > starting_height);
         assert!(!player.on_ground);

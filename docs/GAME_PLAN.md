@@ -2,7 +2,7 @@
 
 ## Product Goal
 
-Build an original, offline, single-player Rust voxel survival game for the developer's Windows 10 laptop. The game can share broad genre conventions such as block terrain, first-person movement, collecting, building, crafting, and survival, but it will use original code, names, UI, sounds, and textures. It will not reproduce Minecraft 1.20.1 source, assets, branding, or exact presentation.
+Build an original Rust game with the broad single-player survival and building feature scope of a modern voxel sandbox, targeting the developer's Windows 10 laptop and OpenGL 2.1 Intel graphics. The requested benchmark is the Minecraft Java 1.20.1 feature set, but the implementation must be clean-room code with original branding, UI, sounds, and assets; it is not a Minecraft client and does not reuse Minecraft source/assets.
 
 ## Target Hardware and Engineering Limits
 
@@ -16,45 +16,45 @@ Build an original, offline, single-player Rust voxel survival game for the devel
 - Keep textures at 16x16; keep per-frame allocations out of gameplay/render loops
 - Treat 30 FPS as a measured minimum goal and 100 FPS as an unverified stretch goal, not a promise
 
-## Current Prototype
+## Current Implementation
 
 - Windows executable launches on the target laptop through a profile-free OpenGL 2.1 context
 - Miniquad fallback handles drivers without `WGL_ARB_create_context_profile`
 - Desktop GL 2.1 shader conversion, optional-VAO handling, and depth-clear fallback are in place
-- A 64x64 flat grass-block world is meshed in draw-call-safe batches with visible side faces
+- A seeded four-by-four chunk region now uses compact 16x256x16 block storage with grass, dirt, and stone layers
 - First-person WASD movement, click-to-capture mouse look, block targeting, and basic block placement/breaking are implemented
 - Gravity, jumping, ground detection, player-vs-block collision, and fall recovery are implemented and covered by tests
+- This is an early foundation, not a feature-complete game or a Minecraft 1.20.1 replacement yet
 - The Windows runtime must still be verified after every new release; CI compilation is not a substitute for testing on the Intel GPU
 
 ## Milestones
 
-### 1. Stable Playable Core
+### 1. World and Player Foundation
 
-- Verify mouse capture/look, movement, block selection, break, and place on target hardware
 - Verify mouse capture/look, movement, jumping, block selection, break, and place on target hardware
-- Acceptance: no GL startup panic, no mesh-clamping spam, controls work, and the player cannot pass through blocks
+- Add chunk-local dirty mesh rebuilding and incremental edits
+- Acceptance: no GL startup panic, no mesh-clamping spam, and a complete movement/building loop on the Intel GPU
 
-### 2. World Data and Terrain
+### 2. Core Sandbox Systems
 
-- Replace the prototype `HashSet` with compact chunk block storage and stable block IDs
-- Add deterministic seeded heightmap terrain, then caves and simple tree structures
-- Use dirty-chunk mesh rebuilds, exposed-face culling, and bounded chunk loading
-- Acceptance: same seed recreates the same world, edits update only affected chunks, memory stays within budget
+- Expand seeded terrain with caves, water, trees, and multiple original biomes
+- Add chunk streaming, lighting, and save/load while preserving the four-chunk render-radius cap
+- Acceptance: worlds reproduce from a seed, chunks stream within RAM targets, and edits rebuild affected chunks only
 
-### 3. Building and Persistence
+### 3. Inventory and Crafting
 
 - Add a small hotbar, block selection, stack counts, and basic collection rules
 - Save world seed, player position, and changed chunk data locally
 - Add safe save versioning and recovery from incomplete saves
 - Acceptance: quit/reopen restores the player and edited world
 
-### 4. Survival Loop
+### 4. Survival and Entities
 
-- Add original crafting recipes, health, hunger, day/night, and a small set of original creatures
+- Add health, hunger, day/night, combat, and original creatures with behavior suited to the CPU budget
 - Keep simulation and AI simple enough for the target CPU
 - Acceptance: a short offline survival session can be started, saved, resumed, and completed
 
-### 5. Potato Tuning and Launcher
+### 5. Compatibility, Tuning, and Launcher
 
 - Measure frame time, memory, and chunk build time on the actual laptop
 - Add adjustable render distance and conservative default settings
@@ -63,4 +63,4 @@ Build an original, offline, single-player Rust voxel survival game for the devel
 
 ## Immediate Next Task
 
-Run the new Windows build on the Intel laptop to verify mouse input, collision, jump, and block edits together. Then replace the prototype flat-world `HashSet` with compact chunk block storage and add deterministic seeded heightmap terrain.
+Run the next Windows build on the Intel laptop to verify seeded terrain, mouse input, collision, jump, and block edits together. Then implement dirty-chunk mesh rebuilding, followed by save/load and the inventory/crafting loop. The complete 1.20.1-scale feature benchmark is a long-term roadmap, not a claim that the current build has parity.
