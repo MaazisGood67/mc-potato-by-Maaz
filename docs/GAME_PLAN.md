@@ -22,6 +22,7 @@ Build an original Rust game with the broad single-player survival and building f
 - Miniquad fallback handles drivers without `WGL_ARB_create_context_profile`
 - Desktop GL 2.1 shader conversion, optional-VAO handling, and depth-clear fallback are in place
 - A seeded four-by-four chunk region now uses compact 16x256x16 block storage with grass, dirt, and stone layers
+- The current performance test renders a one-chunk radius and shows visible/loaded chunk counts; this is a tuning setting, not the final world limit
 - First-person WASD movement, click-to-capture mouse look, block targeting, and basic block placement/breaking are implemented
 - Gravity, jumping, ground detection, player-vs-block collision, and fall recovery are implemented and covered by tests
 - This is an early foundation, not a feature-complete game or a Minecraft 1.20.1 replacement yet
@@ -32,29 +33,37 @@ Build an original Rust game with the broad single-player survival and building f
 ### 1. World and Player Foundation
 
 - Verify mouse capture/look, movement, jumping, block selection, break, and place on target hardware
+- Measure FPS and frame time at 1-, 2-, and 4-chunk radii before raising the default
 - Add chunk-local dirty mesh rebuilding and incremental edits
 - Acceptance: no GL startup panic, no mesh-clamping spam, and a complete movement/building loop on the Intel GPU
 
-### 2. Core Sandbox Systems
+### 2. Main Menu, HUD, and Settings
 
+- Add a lightweight original title/menu screen with New World, Continue, Settings, and Quit
+- Add a readable hotbar/HUD and configurable render distance, mouse sensitivity, and window mode
+- Acceptance: settings persist locally and remain usable at 1366x768 on the target hardware
+
+### 3. Textures and Core Sandbox Systems
+
+- Add original 16x16 pixel textures using a small atlas and nearest-neighbor filtering
 - Expand seeded terrain with caves, water, trees, and multiple original biomes
 - Add chunk streaming, lighting, and save/load while preserving the four-chunk render-radius cap
-- Acceptance: worlds reproduce from a seed, chunks stream within RAM targets, and edits rebuild affected chunks only
+- Acceptance: textures remain crisp, worlds reproduce from a seed, and chunk edits update only affected meshes
 
-### 3. Inventory and Crafting
+### 4. Inventory and Crafting
 
 - Add a small hotbar, block selection, stack counts, and basic collection rules
 - Save world seed, player position, and changed chunk data locally
 - Add safe save versioning and recovery from incomplete saves
 - Acceptance: quit/reopen restores the player and edited world
 
-### 4. Survival and Entities
+### 5. Survival and Entities
 
 - Add health, hunger, day/night, combat, and original creatures with behavior suited to the CPU budget
 - Keep simulation and AI simple enough for the target CPU
 - Acceptance: a short offline survival session can be started, saved, resumed, and completed
 
-### 5. Compatibility, Tuning, and Launcher
+### 6. Compatibility, Tuning, and Launcher
 
 - Measure frame time, memory, and chunk build time on the actual laptop
 - Add adjustable render distance and conservative default settings

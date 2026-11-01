@@ -8,6 +8,7 @@ use world::{BlockId, BlockPos, ChunkPos, World, CHUNK_HEIGHT, CHUNK_WIDTH, START
 const WORLD_HALF_EDGE: f32 = (CHUNK_WIDTH as i32 * START_CHUNK_RADIUS) as f32;
 const WORLD_MIN: f32 = -WORLD_HALF_EDGE;
 const WORLD_MAX: f32 = WORLD_HALF_EDGE;
+const RENDER_DISTANCE_CHUNKS: i32 = 1;
 const DRAW_CALL_MAX_VERTICES: usize = 10_000;
 const DRAW_CALL_MAX_INDICES: usize = 5_000;
 const PLAYER_EYE_HEIGHT: f32 = 1.62;
@@ -81,6 +82,11 @@ struct MeshBuilder {
     indices: Vec<u16>,
 }
 
+struct ChunkMeshes {
+    position: ChunkPos,
+    meshes: Vec<Mesh>,
+}
+
 impl MeshBuilder {
     fn new() -> Self {
         Self {
@@ -116,7 +122,7 @@ impl MeshBuilder {
     }
 }
 
-fn make_world_meshes(world: &World) -> Vec<Mesh> {
+fn make_world_meshes(world: &World) -> Vec<ChunkMeshes> {
     let mut builders = HashMap::<ChunkPos, MeshBuilder>::new();
     world.for_each_non_air(|block_x, block_y, block_z, block_id| {
         let block = BlockPos {
@@ -242,9 +248,17 @@ fn make_world_meshes(world: &World) -> Vec<Mesh> {
     });
 
     builders
-        .into_values()
-        .flat_map(MeshBuilder::finish)
+        .into_iter()
+        .map(|(position, builder)| ChunkMeshes {
+            position,
+            meshes: builder.finish(),
+        })
         .collect()
+}
+
+fn chunk_is_visible(chunk: ChunkPos, player: ChunkPos) -> bool {
+    (chunk.x - player.x).abs() <= RENDER_DISTANCE_CHUNKS
+        && (chunk.z - player.z).abs() <= RENDER_DISTANCE_CHUNKS
 }
 
 fn raycast_blocks(world: &World, origin: Vec3, direction: Vec3) -> Option<(BlockPos, BlockPos)> {
@@ -500,8 +514,18 @@ async fn main() {
             fovy: 70.0,
             ..Default::default()
         });
-        for world_mesh in &world_meshes {
-            draw_mesh(world_mesh);
+        let player_chunk = ChunkPos {
+            x: (player.position.x.floor() as i32).div_euclid(CHUNK_WIDTH as i32),
+            z: (player.position.z.floor() as i32).div_euclid(CHUNK_WIDTH as i32),
+        };
+        let mut visible_chunk_count = 0;
+        for chunk_mesh in &world_meshes {
+            if chunk_is_visible(chunk_mesh.position, player_chunk) {
+                visible_chunk_count += 1;
+                for world_mesh in &chunk_mesh.meshes {
+                    draw_mesh(world_mesh);
+                }
+            }
         }
 
         let targeted_block = if mouse_captured {
@@ -523,7 +547,13 @@ async fn main() {
 
         set_default_camera();
         hud_text.clear();
-        let _ = write!(hud_text, "MaazX Potato Edition | FPS: {}", get_fps());
+        let _ = write!(
+            hud_text,
+            "MaazX | FPS: {} | Chunks: {}/{}",
+            get_fps(),
+            visible_chunk_count,
+            world_meshes.len()
+        );
         draw_text(&hud_text, 10.0, 25.0, 22.0, WHITE);
         hud_text.clear();
         let _ = write!(
@@ -554,8 +584,9 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        collides_at, make_world_meshes, raycast_blocks, update_player_motion, BlockId, BlockPos,
-        Player, DRAW_CALL_MAX_INDICES, DRAW_CALL_MAX_VERTICES, PLAYER_EYE_HEIGHT,
+        chunk_is_visible, collides_at, make_world_meshes, raycast_blocks, update_player_motion,
+        BlockId, BlockPos, ChunkPos, Player, DRAW_CALL_MAX_INDICES, DRAW_CALL_MAX_VERTICES,
+        PLAYER_EYE_HEIGHT,
     };
     use crate::world::World;
     use macroquad::prelude::{vec3, Vec3};
@@ -566,9 +597,11 @@ mod tests {
         let meshes = make_world_meshes(&world);
 
         assert!(!meshes.is_empty());
-        assert!(meshes.iter().all(|mesh| {
-            mesh.vertices.len() < DRAW_CALL_MAX_VERTICES
-                && mesh.indices.len() < DRAW_CALL_MAX_INDICES
+        assert!(meshes.iter().all(|chunk| {
+            chunk.meshes.iter().all(|mesh| {
+                mesh.vertices.len() < DRAW_CALL_MAX_VERTICES
+                    && mesh.indices.len() < DRAW_CALL_MAX_INDICES
+            })
         }));
     }
 
@@ -582,6 +615,14 @@ mod tests {
             hit,
             Some((BlockPos { x: 2, y: 1, z: 2 }, BlockPos { x: 1, y: 1, z: 2 }))
         );
+    }
+
+    #[test]
+    fn render_distance_hides_distant_chunks() {
+        let player_chunk = ChunkPos { x: 0, z: 0 };
+
+        assert!(chunk_is_visible(ChunkPos { x: 1, z: -1 }, player_chunk));
+        assert!(!chunk_is_visible(ChunkPos { x: 2, z: 0 }, player_chunk));
     }
 
     #[test]
